@@ -260,26 +260,24 @@ public class CustomEmojiPlugin extends Plugin
 	}
 
 	private void listEmoji(ChatMessage chatMessage, String message) {
-		ChatMessageBuilder responseBuilder = new ChatMessageBuilder();
+		StringBuilder sb = new StringBuilder();
 		File[] emojiFiles = CUSTOM_EMOJI_DIR.listFiles(IMG_FILE_FILTER);
 		if( emojiFiles == null )
 		{
-			responseBuilder.append("No emoji found.");
+			sb.append("No emoji found.");
 		}
 		else
 		{
+			sb.append("Emoji: ");
 			for (String emojiName : emojiNames)
 			{
-				responseBuilder.append(emojiName).append(" ");
+				sb.append(emojiName).append(" ");
 			}
 		}
 
-		String response = responseBuilder.build();
+		String response = sb.toString();
 
-		final MessageNode messageNode = chatMessage.getMessageNode();
-		messageNode.setRuneLiteFormatMessage(response);
-		chatMessageManager.update(messageNode);
-		client.refreshChat();
+		sendChatMessage(response, ChatColorType.NORMAL);
 	}
 
 	private void sendChatMessage(String chatMessage, ChatColorType chatColorType)
