@@ -16,7 +16,7 @@ import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.OverheadTextChanged;
 import net.runelite.client.callback.ClientThread;
-import net.runelite.client.chat.ChatMessageManager;
+import net.runelite.client.chat.*;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -28,16 +28,22 @@ import static net.runelite.client.RuneLite.RUNELITE_DIR;
 
 @Slf4j
 @PluginDescriptor(
-	name = "Custom Emoji"
+	name = "Custom Emoji",
+	description = "Replaces Discord-style emoji tags with user-defined emoji images"
 )
 public class CustomEmojiPlugin extends Plugin
 {
+	private static final String LIST_EMOJI_COMMAND_STRING = "!emoji";
+
 	private static final Pattern EMOJI_REGEXP = Pattern.compile(":.+?:");
-	private static final Pattern TAG_REGEXP = Pattern.compile("<[^>]*>");
-	private static final Pattern WHITESPACE_REGEXP = Pattern.compile("[\\s\\u00A0]");
 
 	private static final File CUSTOM_EMOJI_DIR = new File(RUNELITE_DIR, "customemoji");
-	private static final FileFilter PNG_FILE_FILTER = f -> f.getName().endsWith("png");
+	private static final List<String> IMG_FILE_TYPES = Arrays.asList("png", "jpg", "jpeg");
+	private static final FileFilter IMG_FILE_FILTER = pathname -> {
+		String filename = pathname.getName();
+		String fileExtension = filename.substring(filename.lastIndexOf('.') + 1);
+		return IMG_FILE_TYPES.contains(fileExtension);
+	};
 
 	private static final Map<String, CustomEmoji> emojiMap = new HashMap<>();
 	private static final List<String> emojiNames = new ArrayList<>();
@@ -49,6 +55,9 @@ public class CustomEmojiPlugin extends Plugin
 	private ClientThread clientThread;
 
 	@Inject
+	private ChatCommandManager chatCommandManager;
+
+	@Inject
 	private ChatMessageManager chatMessageManager;
 
 	private int modIconsStart = -1;
@@ -57,6 +66,7 @@ public class CustomEmojiPlugin extends Plugin
 	protected void startUp() throws Exception
 	{
 		clientThread.invoke(this::loadEmojiIcons);
+		chatCommandManager.registerCommand(LIST_EMOJI_COMMAND_STRING, this::listEmoji);
 	}
 
 	@Subscribe
@@ -68,14 +78,17 @@ public class CustomEmojiPlugin extends Plugin
 		}
 	}
 
-	private static CustomEmoji[] loadCustomEmojis() {
-		File[] emojiFiles = CUSTOM_EMOJI_DIR.listFiles(PNG_FILE_FILTER);
+	private CustomEmoji[] loadCustomEmojis() {
+		File[] emojiFiles = CUSTOM_EMOJI_DIR.listFiles(IMG_FILE_FILTER);
 
-		// If there are no .png files in the directory, return an empty array.
+		// If there are no image files in the directory, return an empty array.
 		if (emojiFiles == null)
 		{
+			log.debug("0 emoji files loaded.");
 			return new CustomEmoji[0];
 		}
+
+		log.debug(emojiFiles.length + " emoji files loaded.");
 
 		for (final File currentEmojiFile : emojiFiles)
 		{
@@ -84,15 +97,28 @@ public class CustomEmojiPlugin extends Plugin
 
 			if (!emojiMap.containsKey(emojiName))
 			{
-				try {
-					BufferedImage bf = ImageIO.read(currentEmojiFile);
-					CustomEmoji newEmoji = new CustomEmoji(emojiName, bf);
-					emojiMap.put(emojiName, newEmoji);
+				BufferedImage bf = null;
+				try
+				{
+					bf = ImageIO.read(currentEmojiFile);
 				}
 				catch (IOException ex)
 				{
 					log.warn("Failed to load the image for emoji " + emojiName, ex);
 				}
+
+				// If unable to load image, send console message telling user to replace that image.
+				if (bf == null)
+				{
+					String message = "Unable to use image for emoji " + emojiName
+							+ ". Please use a different image file for this emoji.";
+					sendChatMessage(message, ChatColorType.HIGHLIGHT);
+					continue;
+				}
+
+				CustomEmoji newEmoji = new CustomEmoji(emojiName, bf);
+				emojiMap.put(emojiName, newEmoji);
+				log.debug("Added emoji " + emojiName);
 			}
 			else
 			{
@@ -143,6 +169,8 @@ public class CustomEmojiPlugin extends Plugin
 
 		log.debug("Adding custom emoji icons");
 		client.setModIcons(newModIcons);
+
+		sendChatMessage("Loaded " + emojiNames.size() + " custom emoji.", ChatColorType.NORMAL);
 	}
 
 	@Subscribe
@@ -229,6 +257,43 @@ public class CustomEmojiPlugin extends Plugin
 		}
 
 		return newMessage;
+	}
+
+	private void listEmoji(ChatMessage chatMessage, String message) {
+		ChatMessageBuilder responseBuilder = new ChatMessageBuilder();
+		File[] emojiFiles = CUSTOM_EMOJI_DIR.listFiles(IMG_FILE_FILTER);
+		if( emojiFiles == null )
+		{
+			responseBuilder.append("No emoji found.");
+		}
+		else
+		{
+			for (String emojiName : emojiNames)
+			{
+				responseBuilder.append(emojiName).append(" ");
+			}
+		}
+
+		String response = responseBuilder.build();
+
+		final MessageNode messageNode = chatMessage.getMessageNode();
+		messageNode.setRuneLiteFormatMessage(response);
+		chatMessageManager.update(messageNode);
+		client.refreshChat();
+	}
+
+	private void sendChatMessage(String chatMessage, ChatColorType chatColorType)
+	{
+		final String message = new ChatMessageBuilder()
+				.append(chatColorType)
+				.append(chatMessage)
+				.build();
+
+		chatMessageManager.queue(
+				QueuedMessage.builder()
+						.type(ChatMessageType.CONSOLE)
+						.runeLiteFormattedMessage(message)
+						.build());
 	}
 
 }
